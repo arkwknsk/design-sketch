@@ -49,10 +49,6 @@ export class AppManager {
     return deg * (Math.PI / 180.0);
   };
 
-  private radToDeg = (rad: number): number => {
-    return (rad * 180.0) / Math.PI;
-  };
-
   /**
    * 気象データ
    *
