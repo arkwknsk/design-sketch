@@ -1,0 +1,20 @@
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background-color: #333333;
+}
+
+#app-container {
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}

@@ -7,7 +7,7 @@ import weatherData from '../data.json';
 import { GridAlign } from '../models/GridAlign';
 import { DisplayObjectHelper } from '../utils/DisplayObjectHelper';
 import { TimeUtil } from '../utils/TimeUtil';
-import { Bar } from '../views/Bar';
+import { DayBundle } from '../views/DayBundle';
 import { GridView } from '../views/GridView';
 import { RandomTitleOneLine } from '../views/RandomTitleOneLine';
 import { ScreenHelper } from '../views/ScreenHelper';
@@ -16,7 +16,7 @@ import { ScreenHelper } from '../views/ScreenHelper';
   https://www.data.jma.go.jp/risk/obsdl/index.php
 */
 
-interface WeatherData {
+export interface WeatherData {
   datetime: Date; // Changed to accept Date type
   wind_speed: number;
   wind_direction: string;
@@ -34,20 +34,15 @@ interface WeatherData {
   wind_direction_angle: number;
 }
 
-interface WeatherDataContainer {
+export interface WeatherDataContainer {
   data: WeatherData[];
 }
-
 
 /**
  * Main Class(Presenter)
  */
 export class AppManager {
   private static _instance: AppManager | undefined;
-
-  private degToRad = (deg: number): number => {
-    return deg * (Math.PI / 180.0);
-  };
 
   /**
    * 気象データ
@@ -57,6 +52,7 @@ export class AppManager {
    * @memberof AppManager
    */
   private _weatherData: WeatherData[] = this.convertWeatherData(weatherData).data;
+  private _weatherDataByDay: Record<string, WeatherData[]> = {};
 
   /**
    * 現在表示している気象データのインデックス
@@ -71,10 +67,6 @@ export class AppManager {
 
   private _targetDegree: number[][] = Array.from({ length: Context.GRID_DIVISIONS_X }, () =>
     Array(Context.GRID_DIVISIONS_Y).fill(this._currentWeatherData.wind_direction_angle));
-  private _targetRad: number[][] = Array.from({ length: Context.GRID_DIVISIONS_X }, () =>
-    Array(Context.GRID_DIVISIONS_Y).fill(this.degToRad(this._currentWeatherData.wind_direction_angle)));
-  private _currentFrequency: number = this._currentWeatherData.wind_speed;
-  private _currentAmplitude: number = this._currentWeatherData.wind_speed;
 
   // View
   public _app: Application | undefined;
@@ -94,8 +86,8 @@ export class AppManager {
    * @private
    * @memberof AppManager
    */
-  private _cOffset = 2;
-  private _rOffset = 2;
+  private _cOffset = 3;
+  private _rOffset = 4;
 
   /**
    * 前の時間
@@ -129,7 +121,7 @@ export class AppManager {
    */
   private _grid: Graphics | undefined;
 
-  private _disks: Bar[][] = Array.from({ length: Context.GRID_DIVISIONS_X }, () => []);
+  private _disks: DayBundle[][] = Array.from({ length: Context.GRID_DIVISIONS_X }, () => []);
 
   private _recordDateText: Text | undefined;
   private _windSpeedText: Text | undefined;
@@ -213,7 +205,7 @@ export class AppManager {
     this.initializeCanvasStyle();
     this.resizeApp();
 
-    noise.seed(new Date('2024-05-01 00:00:00').getTime());
+    noise.seed(new Date('2024-04-01 00:00:00').getTime());
   }
 
   /**
@@ -229,7 +221,7 @@ export class AppManager {
     await this._app.init({
       width: this._gridView.stageWidth,
       height: this._gridView.stageHeight,
-      backgroundColor: 0xffffff, // Ensure this is a hexadecimal value
+      backgroundColor: Context.BACKGROUND_COLOR, // Ensure this is a hexadecimal value
       antialias: true,
       autoDensity: true,
       resolution: 2,
@@ -299,15 +291,7 @@ export class AppManager {
 
     this._recordDateText = DisplayObjectHelper.getText('', "Akshar Regular", 14, Context.TITLE_COLOR);
     this._mainStage.addChild(this._recordDateText);
-    this._gridView.addAnchor(this._recordDateText, 1, this._gridView.divisionY - 1, GridAlign.TOP_LEFT);
-
-    this._windDirectionText = DisplayObjectHelper.getText('Wind: Direction: none', "Akshar Regular", 14, Context.TITLE_COLOR);
-    this._mainStage.addChild(this._windDirectionText);
-    this._gridView.addAnchor(this._windDirectionText, 6, this._gridView.divisionY - 1, GridAlign.TOP_LEFT);
-
-    this._windSpeedText = DisplayObjectHelper.getText(`Speed: none`, "Akshar Regular", 14, Context.TITLE_COLOR);
-    this._mainStage.addChild(this._windSpeedText);
-    this._gridView.addAnchor(this._windSpeedText, 12, this._gridView.divisionY - 1, GridAlign.TOP_RIGHT);
+    this._gridView.addAnchor(this._recordDateText, this._gridView.divisionX / 2 - 1, this._gridView.divisionY - 1, GridAlign.TOP_LEFT);
 
     const place = DisplayObjectHelper.getText(`Morioka, Iwate, Japan`, "Akshar Regular", 14, Context.TITLE_COLOR);
     this._mainStage.addChild(place);
@@ -319,27 +303,37 @@ export class AppManager {
     this._mainStage.addChild(latLng);
     latLng.angle = 270;
     latLng.pivot.set(10, -10);
-    this._gridView.addAnchor(latLng, this._gridView.divisionX + 2, this._gridView.divisionY / 2 + 1, GridAlign.TOP_RIGHT);
+    this._gridView.addAnchor(latLng, this._gridView.divisionX + 3, this._gridView.divisionY / 2 + 1, GridAlign.TOP_RIGHT);
 
     this.updateText();
 
-    for (let c = 0; c < Context.GRID_DIVISIONS_X - this._cOffset * 2 + 1; c++) {
-      for (let r = 0; r < Context.GRID_DIVISIONS_Y - this._rOffset * 2 + 1; r++) {
-        const disk = new Bar();
-        this._mainStage.addChild(disk);
-        this._gridView.addAnchor(disk, c + this._cOffset, r + this._rOffset, GridAlign.TOP_LEFT);
-        this._mainStage.addChild(disk);
-        this._disks[c].push(disk);
+    this._weatherDataByDay = this._weatherData.reduce<Record<string, WeatherData[]>>((acc, data) => {
+      // 日本のタイムゾーンを考慮した日付の取得
+      const dateKey = new Date(data.datetime.getTime() + (9 * 60 * 60 * 1000))
+        .toISOString()
+        .split('T')[0]; // Get date in YYYY-MM-DD format
+      if (!acc[dateKey]) {
+        acc[dateKey] = [];
+      }
+      acc[dateKey].push(data);
+      return acc;
+    }, {});
+
+    let index = 0;
+    for (let r = 0; r <= 6; r++) {
+      for (let c = 0; c < 7; c++) {
+        const dateKey = Object.keys(this._weatherDataByDay)[index];
+        if (dateKey) {
+          const weatherDataForDay = this._weatherDataByDay[dateKey];
+          const disk = new DayBundle(weatherDataForDay, index * 0.2);
+          this._mainStage.addChild(disk);
+          this._gridView.addAnchor(disk, c + this._cOffset + c, r + this._rOffset + r, GridAlign.TOP_LEFT);
+          this._mainStage.addChild(disk);
+          this._disks[c].push(disk);
+        }
+        index++;
       }
     }
-
-    for (let i = 0; i < this._disks.length; i++) {
-      for (let j = 0; j < this._disks[i].length; j++) {
-        this._targetRad[i][j] = this.degToRad(this._currentWeatherData.wind_direction_angle);
-        this._disks[i][j].rotation = this.degToRad(this._currentWeatherData.wind_direction_angle);
-      }
-    }
-
 
   }
 
@@ -388,63 +382,21 @@ export class AppManager {
   update(): void {
     this._stats.begin();
 
-    const time = Date.now() / AppManager.PARAMS_NOISE.time;
-
     const now = new Date();
 
     const prevSeconds = this._prevTime.getSeconds();
     const currentSeconds = now.getSeconds();
 
     if (Math.abs(currentSeconds - prevSeconds) >= 3) {
-      this._weatherDataIndex = (this._weatherDataIndex + 1) % this._weatherData.length;
-      this._prevTime = now;
-
-      this._currentWeatherData = this._weatherData[this._weatherDataIndex];
-      AppManager.PARAMS_GENERAL.degree = this._currentWeatherData.wind_direction_angle;
-      AppManager.PARAMS_GENERAL.speed = this._currentWeatherData.wind_speed;
-      this.updateText();
     }
 
-    this._currentFrequency = Math.floor((this._currentWeatherData.wind_speed * 0.8) * 10) / 10;
-    this._currentAmplitude = 0.1;
-    AppManager.PARAMS_NOISE.frequency = this._currentFrequency;
-    AppManager.PARAMS_NOISE.amplitude = this._currentAmplitude;
-    AppManager.PARAMS_NOISE.scale = (this._currentWeatherData.wind_speed * .06);
-
-    for (let i = 0; i < this._disks.length; i++) {
-      for (let j = 0; j < this._disks[i].length; j++) {
-
-        const px = j / this._disks.length * AppManager.PARAMS_NOISE.scale + time;
-        const py = i / this._disks[i].length * AppManager.PARAMS_NOISE.scale;
-
-        const n = noise.perlin2(px * this._currentFrequency, py * this._currentFrequency) * this._currentAmplitude;
-        this._targetRad[i][j] = 2 * Math.PI * n + this.degToRad(this._currentWeatherData.wind_direction_angle);
-
-        let diff = (this._targetRad[i][j] - this._disks[i][j].rotation);
-
-        if (diff > Math.PI) {
-          diff -= 2 * Math.PI;
-        } else if (diff < -Math.PI) {
-          diff += 2 * Math.PI;
-        }
-        const rotationAmount: number = diff * 0.05;
-
-        this._disks[i][j].rotation += rotationAmount;
-
-        if (i === 0 && j === 0) {
-          AppManager.PARAMS_GENERAL.n = n;
-        }
-      }
-    }
 
     this._stats.end();
   }
 
   private setInitialDegree(): void {
-    const cOffset = 2;
-    const rOffset = 2;
-    for (let i = 0; i < Context.GRID_DIVISIONS_X - 1 - cOffset * 2; i++) {
-      for (let j = 0; j < Context.GRID_DIVISIONS_Y - 1 - rOffset * 2; j++) {
+    for (let i = 0; i < this._disks.length; i++) {
+      for (let j = 0; j < this._disks[i].length; j++) {
         this._targetDegree[i][j] = this._currentWeatherData.wind_direction_angle;
         this._disks[i][j].angle = this._targetDegree[i][j];
       }
@@ -452,7 +404,7 @@ export class AppManager {
   }
 
   private updateText(): void {
-    if (this._recordDateText) this._recordDateText.text = TimeUtil.getTimestampShort(this._currentWeatherData.datetime);
+    if (this._recordDateText) this._recordDateText.text = TimeUtil.getTimestampWithoutTime(this._currentWeatherData.datetime);
     const windDirection = this._currentWeatherData.wind_direction.replace(/北/g, 'N').replace(/東/g, 'E').replace(/南/g, 'S').replace(/西/g, 'W');
     if (this._windDirectionText) this._windDirectionText.text = `Wind Direction: ${windDirection}`;
     if (this._windSpeedText) this._windSpeedText.text = `Speed: ${this._currentWeatherData.wind_speed} m/s`;
