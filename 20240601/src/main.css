@@ -1,0 +1,37 @@
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background-color: #333333;
+}
+
+#container {
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative; /* Added: Establishes container as reference point for absolute positioning */
+}
+
+#app-container, #three-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%); /* Corrects offset from center */
+}
+
+#app-container {
+  /* Add additional styles as needed */
+}
+
+#three-container {
+  /* Add additional styles as needed */
+}
+
